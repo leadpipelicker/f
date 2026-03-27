@@ -1,21 +1,12 @@
-// server.js
-const express = require('express');
-const app = express();
-
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*'); 
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
-
-app.use(express.json({ limit: '10mb' }));
-
 app.post('/proxy', async (req, res) => {
   try {
+    console.log('→ Forwarding request to Scitely...');
+    console.log('Headers sent:', {
+      Authorization: 'Bearer [REDACTED]', // Don't log full key!
+      'Content-Type': 'application/json'
+    });
+    console.log('Body sent:', JSON.stringify(req.body, null, 2));
+
     const scitelyResponse = await fetch('https://api.scitely.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -25,19 +16,27 @@ app.post('/proxy', async (req, res) => {
       body: JSON.stringify(req.body),
     });
 
-    const data = await scitelyResponse.json();
-    res.status(scitelyResponse.status).json(data);
+    console.log('← Scitely responded with status:', scitelyResponse.status);
+
+    // Even if status is 4xx/5xx, try to read body
+    const data = await scitelyResponse.text(); // Use .text() first to avoid JSON parse errors
+    console.log('Scitely response body:', data);
+
+    // Try to parse as JSON only if valid
+    let jsonData;
+    try {
+      jsonData = JSON.parse(data);
+    } catch (e) {
+      return res.status(500).json({ error: 'Invalid JSON from Scitely', raw: data });
+    }
+
+    res.status(scitelyResponse.status).json(jsonData);
   } catch (error) {
-    console.error('Proxy error:', error);
-    res.status(500).json({ error: 'Failed to reach Scitely API' });
+    console.error('🔥 Proxy error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    });
+    res.status(500).json({ error: 'Proxy failed', details: error.message });
   }
-});
-
-app.get('/', (req, res) => {
-  res.send('Scitely Proxy is running!');
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
